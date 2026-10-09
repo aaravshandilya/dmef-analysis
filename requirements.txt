@@ -1,0 +1,9 @@
+numpy>=2.2,<3
+pandas>=2.2,<3
+Pillow>=11,<13
+scipy>=1.10,<2
+opencv-python-headless>=4.11,<5
+matplotlib>=3.10,<4
+scikit-learn>=1.6,<2
+joblib>=1.5,<2
+streamlit>=1.50,<2

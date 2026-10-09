@@ -1,0 +1,10 @@
+{
+  "brightness_percentile": 75,
+  "uniformity_percentile": 80,
+  "inset": 0.12,
+  "processed_images": 10,
+  "wells": 40,
+  "regions": 1475,
+  "skipped_images": [],
+  "interpretation": "Source encoded RGB (without ICC gamut conversion); regions are not verified colonies or calibrated fluorescence"
+}

@@ -1,0 +1,9 @@
+{
+  "images": 10,
+  "wells_reviewed": 40,
+  "candidate_regions": 933,
+  "original_pixel_dimensions_used": true,
+  "threshold_mad": 4.5,
+  "inset_fraction": 0.12,
+  "interpretation": "Unverified optical candidates; no supervised colony model trained."
+}

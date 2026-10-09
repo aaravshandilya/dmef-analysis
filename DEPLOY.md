@@ -1,24 +1,17 @@
 # GitHub and public app deployment
 
-## GitHub
+## GitHub and Windows
 
-The working project has local Git history. A downloaded ZIP does not include
-the `.git` directory, so initialize it before pushing. Keep `app.py`, `bright_regions.py`,
-`requirements.txt`, `data/raw`, and the sample CSV files in the repository.
+The current project is already in
+[aaravshandilya/dmef-analysis](https://github.com/aaravshandilya/dmef-analysis).
+In VS Code choose **Clone Git Repository**, paste
+`https://github.com/aaravshandilya/dmef-analysis.git`, and open the downloaded
+folder. GitHub sign-in may be required because the repository is private.
+On Windows, double-click `run_windows.bat` in that folder. The launcher creates
+`.venv`, installs dependencies from `requirements.txt`, and starts Streamlit.
+You can stop the app with Ctrl+C in the command window.
+
 The `.venv` folder is ignored. No secrets are needed by the app.
-
-To publish the extracted ZIP from Windows, first create an **empty** repository
-named `dmef-analysis` in your GitHub account (leave the GitHub README and
-`.gitignore` options unchecked). In PowerShell inside the extracted
-`dmef-analysis` folder, run:
-
-```powershell
-git init -b main
-git add .
-git commit -m "Add DMEF image analysis app"
-git remote add origin https://github.com/YOUR_USERNAME/dmef-analysis.git
-git push -u origin main
-```
 
 Use a **private repository** if the source photographs must remain restricted.
 Review the included research images and result files before making a repository
@@ -29,7 +22,7 @@ the appropriate Streamlit Community Cloud access and app visibility settings.
 
 1. Sign in at https://share.streamlit.io and connect the GitHub account that
    owns the repository.
-2. Create an app using repository `YOUR_USERNAME/dmef-analysis`, branch `main`,
+2. Create an app using repository `aaravshandilya/dmef-analysis`, branch `main`,
    and entrypoint `app.py`.
 3. Set the app's visibility to **Public** and verify the resulting
    `*.streamlit.app` URL in a signed-out browser window.

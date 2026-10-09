@@ -25,7 +25,11 @@ units or as a dilution series without a confirmed plate map and calibration.
 
 ### Run in VS Code on Windows (PowerShell)
 
-Open the extracted `dmef-analysis` folder in VS Code, then use its terminal:
+Clone or download the [GitHub repository](https://github.com/aaravshandilya/dmef-analysis).
+Open the `dmef-analysis` folder in VS Code and double-click `run_windows.bat`
+in File Explorer. On the first launch, it creates `.venv` and installs the
+dependencies, which may take several minutes. Keep the command window open.
+Alternatively, use the VS Code PowerShell terminal:
 
 ```powershell
 python -m venv .venv
@@ -170,18 +174,11 @@ python dmef.py predict --measurements new-results/measurements.csv --output pred
 This baseline predicts classes, not concentration. Only load trusted `.joblib` files. Model files are generated locally. Review prediction inputs using the same imaging/ROI protocol. More data alone does not establish accuracy; class balance, independent experiments and controls matter.
 
 ## GitHub repository and public testing app
-The project is committed locally but a GitHub repository has not yet been
-created. See [DEPLOY.md](DEPLOY.md) for the Windows Git push and Streamlit
-Community Cloud publishing workflow. The repository may stay private while
-the hosted app is public. Review research photos before deciding whether to
-publish repository contents. If GitHub CLI is available, the optional private
-repository helper is:
-```bash
-bash publish-private.sh
-```
-The script uses your GitHub CLI login, creates `dmef-analysis` as private,
-verifies privacy before pushing, and uploads code and included data. It stops
-on an existing origin or name collision. No credentials are in this project.
+The project is in the private
+[dmef-analysis repository](https://github.com/aaravshandilya/dmef-analysis).
+See [DEPLOY.md](DEPLOY.md) for Streamlit Community Cloud publishing. The
+repository may stay private while the hosted app is public. Review research
+photos before changing repository visibility.
 
 ## Earlier pilot results
 The earlier pipeline reported four inner wells in every image: 40 measurements across 10 captures. That report predates the current strict image decoding. This is a detection count, not 40 independent biological samples or evidence of detection accuracy on unseen data. All labels remain unconfirmed. The baseline geometry, signed correction, refusal-to-train, and grouped-training smoke tests passed (4 tests). Synthetic smoke-test performance is not reported as research performance.

@@ -25,19 +25,17 @@ units or as a dilution series without a confirmed plate map and calibration.
 
 ### Run in VS Code on Windows (PowerShell)
 
-Clone or download the [GitHub repository](https://github.com/aaravshandilya/dmef-analysis).
-Open the `dmef-analysis` folder in VS Code and double-click `run_windows.bat`
-in File Explorer. On the first launch, it creates `.venv` and installs the
-dependencies, which may take several minutes. Keep the command window open.
-Alternatively, use the VS Code PowerShell terminal:
+Open the extracted `dmef-analysis` folder in VS Code. On Windows, double-click
+`run_windows.bat` in File Explorer to install requirements and start the app on
+`http://localhost:8502`. Or use the VS Code PowerShell terminal:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m streamlit run app.py
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.address localhost --server.port 8502
 ```
 
-The terminal prints a local address (usually `http://localhost:8501`). Open
+The terminal prints the local address `http://localhost:8502`. Open
 it in your browser. Upload original photos or a ZIP of photos, choose settings,
 click **Analyze wells**, select a well and region type, inspect its overlay
 beside the table of region sizes and RGB values, and download the results ZIP.
@@ -68,11 +66,23 @@ change the detected regions and should be checked against manually marked
 examples to assess accuracy.
 
 For one region, the app offers **Average**, **Centroid pixel**, and
-**Integrated intensity** RGB views. The area table also includes R/G and B/G
+**Integrated intensity** RGB views. The area table also includes R/G and G/B
 ratios. See [DATA_DICTIONARY.md](DATA_DICTIONARY.md) for formulas, units, and
 every CSV field. `sample_plate_map.csv` contains demonstration labels for one
 image; `sample_regions.csv` contains example output. For GitHub and public
 Streamlit hosting steps, see [DEPLOY.md](DEPLOY.md).
+
+The **Circled background RGB analysis** section detects white hand-drawn loops
+and measures the area inside each loop. It provides the same three RGB views,
+pixel sizes, ratio columns, swatches, and RGB histograms used for well regions.
+The exported `outside_areas.csv`, `outside_areas.png`, and
+`outside_color_key.png` let you inspect these areas separately. White annotation
+strokes, wells, and their reflective rims are excluded. If an image has no
+detectable white loops, the app uses eight fixed edge reference patches.
+These areas are image background references, not independently measured blank
+controls.
+`sample_outside_areas.csv` contains the nine measurements from the annotated
+example used during development.
 
 ### How the bright region analysis works
 
@@ -174,11 +184,9 @@ python dmef.py predict --measurements new-results/measurements.csv --output pred
 This baseline predicts classes, not concentration. Only load trusted `.joblib` files. Model files are generated locally. Review prediction inputs using the same imaging/ROI protocol. More data alone does not establish accuracy; class balance, independent experiments and controls matter.
 
 ## GitHub repository and public testing app
-The project is in the private
+The project is in the public
 [dmef-analysis repository](https://github.com/aaravshandilya/dmef-analysis).
-See [DEPLOY.md](DEPLOY.md) for Streamlit Community Cloud publishing. The
-repository may stay private while the hosted app is public. Review research
-photos before changing repository visibility.
+See [DEPLOY.md](DEPLOY.md) for the Streamlit Community Cloud configuration.
 
 ## Earlier pilot results
 The earlier pipeline reported four inner wells in every image: 40 measurements across 10 captures. That report predates the current strict image decoding. This is a detection count, not 40 independent biological samples or evidence of detection accuracy on unseen data. All labels remain unconfirmed. The baseline geometry, signed correction, refusal-to-train, and grouped-training smoke tests passed (4 tests). Synthetic smoke-test performance is not reported as research performance.

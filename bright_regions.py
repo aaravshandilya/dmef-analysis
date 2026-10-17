@@ -22,7 +22,7 @@ REGION_FIELDS = ["image_id", "well_id", "region_id", "kind", "area_px", "center_
                  "mean_R_0_255", "mean_G_0_255", "mean_B_0_255",
                  "centroid_R_0_255", "centroid_G_0_255", "centroid_B_0_255",
                  "integrated_R", "integrated_G", "integrated_B", "integrated_RGB_total",
-                 "ratio_R_to_G", "ratio_B_to_G", "mean_brightness_0_255",
+                 "ratio_R_to_G", "ratio_G_to_B", "mean_brightness_0_255",
                  "mean_local_color_std", "sample_hex", "sample_id", "dilution"]
 PALETTE = [(255, 74, 83), (64, 211, 240), (139, 234, 85), (219, 122, 247),
            (255, 184, 63), (57, 121, 255), (245, 103, 180), (97, 233, 181)]
@@ -162,7 +162,7 @@ def segment_well(rgb: np.ndarray, roi: dict, *, inset: float = .12,
                             "integrated_B": int(integrated[2]),
                             "integrated_RGB_total": int(integrated.sum()),
                             "ratio_R_to_G": round(float(integrated[0] / integrated[1]), 4) if integrated[1] else "",
-                            "ratio_B_to_G": round(float(integrated[2] / integrated[1]), 4) if integrated[1] else "",
+                            "ratio_G_to_B": round(float(integrated[1] / integrated[2]), 4) if integrated[2] else "",
                             "mean_brightness_0_255": round(float(brightness[pixels].mean()), 2),
                             "mean_local_color_std": round(float(color_std[pixels].mean()), 2),
                             "sample_hex": "#" + "".join(f"{int(round(v)):02X}" for v in mean_rgb),
@@ -240,7 +240,8 @@ def save_color_key(path: Path, regions: list[dict], image_id: str, well_id: str)
     for region, (key_ax, hist_ax) in zip(regions, axes):
         color = np.array([region[f"mean_{c}_0_255"] for c in "RGB"]) / 255
         key_ax.add_patch(plt.Rectangle((0, .18), (.3), .64, color=color))
-        key_ax.text(.37, .64, f"Region {region['region_id']} ({region['kind']})  ·  {region['area_px']:,} px", fontsize=9)
+        label = region.get("area_id", f"Region {region['region_id']}")
+        key_ax.text(.37, .64, f"{label} ({region['kind']})  ·  {region['area_px']:,} px", fontsize=9)
         key_ax.text(.37, .34, "RGB (" + ", ".join(
             f"{region[f'mean_{channel}_0_255']:.2f}" for channel in "RGB") + ")",
                     fontsize=10)
@@ -262,6 +263,163 @@ def save_color_key(path: Path, regions: list[dict], image_id: str, well_id: str)
     plt.close(fig)
 
 
+BACKGROUND_FIELDS = ["image_id", "area_id", "location", "selection_method", "area_px", "center_x_px", "center_y_px",
+                     "centroid_pixel_x_px", "centroid_pixel_y_px",
+                     "mean_R_0_255", "mean_G_0_255", "mean_B_0_255",
+                     "centroid_R_0_255", "centroid_G_0_255", "centroid_B_0_255",
+                     "integrated_R", "integrated_G", "integrated_B", "integrated_RGB_total",
+                     "ratio_R_to_G", "ratio_G_to_B", "sample_hex"]
+BACKGROUND_LOCATIONS = ("top-left", "top-center", "top-right", "middle-left",
+                        "middle-right", "bottom-left", "bottom-center", "bottom-right")
+
+
+def background_record(rgb: np.ndarray, selected: np.ndarray, *, image_id: str,
+                      area_id: str, location: str, selection_method: str,
+                      origin: tuple[int, int]) -> tuple[dict, np.ndarray]:
+    """Calculate the same RGB views and ratios used for highlighted well regions."""
+    y0, x0 = origin[1], origin[0]
+    ys, xs = np.nonzero(selected)
+    pixels = rgb[y0:y0 + selected.shape[0], x0:x0 + selected.shape[1]][selected]
+    mean = pixels.mean(axis=0)
+    center_x, center_y = float(xs.mean()), float(ys.mean())
+    nearest = np.argmin((xs - center_x) ** 2 + (ys - center_y) ** 2)
+    centroid_x, centroid_y = int(xs[nearest]) + x0, int(ys[nearest]) + y0
+    centroid = rgb[centroid_y, centroid_x]
+    integrated = pixels.sum(axis=0, dtype=np.uint64)
+    record = {"image_id": image_id, "area_id": area_id, "location": location,
+              "selection_method": selection_method, "area_px": len(pixels),
+              "center_x_px": round(center_x + x0, 1), "center_y_px": round(center_y + y0, 1),
+              "centroid_pixel_x_px": centroid_x, "centroid_pixel_y_px": centroid_y,
+              **{f"mean_{channel}_0_255": round(float(mean[i]), 2)
+                 for i, channel in enumerate("RGB")},
+              **{f"centroid_{channel}_0_255": int(centroid[i])
+                 for i, channel in enumerate("RGB")},
+              **{f"integrated_{channel}": int(integrated[i])
+                 for i, channel in enumerate("RGB")},
+              "integrated_RGB_total": int(integrated.sum()),
+              "ratio_R_to_G": round(float(integrated[0] / integrated[1]), 4) if integrated[1] else "",
+              "ratio_G_to_B": round(float(integrated[1] / integrated[2]), 4) if integrated[2] else "",
+              "sample_hex": "#" + "".join(f"{int(round(v)):02X}" for v in mean)}
+    return record, pixels
+
+
+def detect_circled_background_areas(rgb: np.ndarray, rois: list[dict], image_id: str
+                                     ) -> tuple[list[dict], list[dict]]:
+    """Measure backgrounds inside hand-drawn white loops on an uploaded image."""
+    height, width = rgb.shape[:2]
+    spread = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
+    white_stroke = (rgb.min(axis=2) >= 180) & (spread <= 45)
+    radius = max(3, round(min(height, width) * .003))
+    joined = ndi.binary_dilation(white_stroke, iterations=radius)
+    labels, _ = ndi.label(joined)
+    candidates = []
+    for label_id, slices in enumerate(ndi.find_objects(labels), 1):
+        if slices is None:
+            continue
+        sy, sx = slices
+        bh, bw = sy.stop - sy.start, sx.stop - sx.start
+        area = int(np.count_nonzero(labels[slices] == label_id))
+        if area < .0007 * height * width:
+            continue
+        if max(bw, bh) < .04 * min(width, height) or bw * bh > .16 * height * width:
+            continue
+        if not .18 <= bw / max(1, bh) <= 5.5:
+            continue
+        candidates.append({"x0": sx.start, "y0": sy.start, "x1": sx.stop,
+                           "y1": sy.stop, "cx": (sx.start + sx.stop) / 2,
+                           "cy": (sy.start + sy.stop) / 2})
+    # Avoid interpreting ordinary pale image content as markup.
+    if not 3 <= len(candidates) <= 20 or white_stroke.mean() > .12:
+        return [], []
+    candidates.sort(key=lambda item: item["cy"])
+    rows: list[list[dict]] = []
+    row_gap = .15 * height
+    for candidate in candidates:
+        if not rows or candidate["cy"] - np.mean([item["cy"] for item in rows[-1]]) > row_gap:
+            rows.append([candidate])
+        else:
+            rows[-1].append(candidate)
+    candidates = [item for row in rows for item in sorted(row, key=lambda value: value["cx"])]
+    records, drawings = [], []
+    stroke_guard = ndi.binary_dilation(white_stroke, iterations=max(2, radius // 2))
+    for index, item in enumerate(candidates, 1):
+        x0, y0, x1, y1 = item["x0"], item["y0"], item["x1"], item["y1"]
+        bh, bw = y1 - y0, x1 - x0
+        inset = max(5, round(min(bw, bh) * .035))
+        yy, xx = np.ogrid[:bh, :bw]
+        rx, ry = max(1., bw / 2 - inset), max(1., bh / 2 - inset)
+        selected = ((xx - (bw - 1) / 2) / rx) ** 2 + ((yy - (bh - 1) / 2) / ry) ** 2 <= 1
+        selected &= ~stroke_guard[y0:y1, x0:x1]
+        for roi in rois:
+            relative = {**roi, "cx": roi["cx"] - x0, "cy": roi["cy"] - y0,
+                        "rx": roi["rx"] * 1.8, "ry": roi["ry"] * 1.8}
+            selected &= ~interior_mask((bh, bw), relative, 0)
+        if np.count_nonzero(selected) < 100:
+            continue
+        area_id = f"C{index:02d}"
+        record, pixels = background_record(rgb, selected, image_id=image_id, area_id=area_id,
+                                           location="circled background", selection_method="white loop",
+                                           origin=(x0, y0))
+        records.append(record)
+        drawings.append({**record, "region_id": index, "kind": "circled background",
+                         "pixels_rgb": pixels, "rectangle": (x0, y0, x1 - 1, y1 - 1),
+                         "selected": selected})
+    return records, drawings
+
+
+def measure_outside_patches(rgb: np.ndarray, rois: list[dict], image_id: str,
+                            fraction: float = .12) -> tuple[list[dict], list[dict]]:
+    """Measure eight fixed border patches, excluding detected wells and their rims.
+
+    These are image-background references, not independently confirmed blanks.
+    Pixel coordinates and channel sums use the unresized source image.
+    """
+    height, width = rgb.shape[:2]
+    patch_w, patch_h = max(1, round(width * fraction)), max(1, round(height * fraction))
+    rectangles = ((0, 0), ((width - patch_w) // 2, 0), (width - patch_w, 0),
+                  (0, (height - patch_h) // 2), (width - patch_w, (height - patch_h) // 2),
+                  (0, height - patch_h), ((width - patch_w) // 2, height - patch_h),
+                  (width - patch_w, height - patch_h))
+    records, drawings = [], []
+    for index, (location, (x0, y0)) in enumerate(zip(BACKGROUND_LOCATIONS, rectangles), 1):
+        x1, y1 = x0 + patch_w, y0 + patch_h
+        # Work on the patch only; avoid an extra image-sized boolean mask for each area.
+        selected = np.ones((patch_h, patch_w), dtype=bool)
+        for roi in rois:
+            relative = {**roi, "cx": roi["cx"] - x0, "cy": roi["cy"] - y0,
+                        "rx": roi["rx"] * 1.8, "ry": roi["ry"] * 1.8}
+            selected &= ~interior_mask((patch_h, patch_w), relative, 0)
+        if not selected.any():
+            continue
+        record, pixels = background_record(rgb, selected, image_id=image_id, area_id=f"E{index:02d}",
+                                           location=location, selection_method="fixed edge patch",
+                                           origin=(x0, y0))
+        records.append(record)
+        drawings.append({**record, "region_id": index, "kind": location, "pixels_rgb": pixels,
+                         "rectangle": (x0, y0, x1 - 1, y1 - 1), "selected": selected})
+    return records, drawings
+
+
+def save_outside_overlay(path: Path, rgb: np.ndarray, areas: list[dict]) -> None:
+    marked = rgb.copy()
+    for area in areas:
+        x0, y0, x1, y1 = area["rectangle"]
+        selected = area["selected"]
+        crop = marked[y0:y1 + 1, x0:x1 + 1]
+        color = np.asarray(PALETTE[(area["region_id"] - 1) % len(PALETTE)])
+        crop[selected] = (.75 * crop[selected] + .25 * color).astype(np.uint8)
+        boundary = selected & ~ndi.binary_erosion(selected, iterations=3)
+        crop[boundary] = color
+    image = Image.fromarray(marked)
+    draw = ImageDraw.Draw(image)
+    for area in areas:
+        color = PALETTE[(area["region_id"] - 1) % len(PALETTE)]
+        x0, y0, _, _ = area["rectangle"]
+        draw.text((x0 + 12, y0 + 10), f"{area['area_id']} {area['location']}",
+                  fill="white", stroke_width=3, stroke_fill="black")
+    image.save(path)
+
+
 def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None = None,
                    plate_map_path: Path | None = None, brightness_percentile: int = 75,
                    uniformity_percentile: int = 80, inset: float = .12) -> dict:
@@ -278,7 +436,7 @@ def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None 
                 if key in plate_map:
                     raise ValueError(f"Duplicate plate map entry: {key}")
                 plate_map[key] = row
-    records, summary, found = [], [], {}
+    records, background_records, summary, found = [], [], [], {}
     for path in sorted(input_dir.iterdir()):
         if path.suffix.lower() not in IMAGE_SUFFIXES:
             continue
@@ -292,6 +450,14 @@ def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None 
         if rois is None:
             rois = detect_wells(rgb)
         found[image_id] = rois
+        background, areas = detect_circled_background_areas(rgb, rois, image_id)
+        if not background:
+            background, areas = measure_outside_patches(rgb, rois, image_id)
+        background_records.extend(background)
+        destination = output_dir / image_id
+        destination.mkdir(exist_ok=True)
+        save_outside_overlay(destination / "outside_areas.png", rgb, areas)
+        save_color_key(destination / "outside_color_key.png", areas, image_id, "outside wells")
         if len(rois) != 4:
             summary.append({"image_id": image_id, "well_id": "", "status": f"review_well_count_{len(rois)}"})
             continue
@@ -323,6 +489,10 @@ def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None 
         writer = csv.DictWriter(file, fieldnames=REGION_FIELDS)
         writer.writeheader()
         writer.writerows(records)
+    with (output_dir / "outside_areas.csv").open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=BACKGROUND_FIELDS)
+        writer.writeheader()
+        writer.writerows(background_records)
     fields = ["image_id", "well_id", "status", "regions", "sample_id", "dilution",
               "brightness_cut_0_255", "uniformity_cut", "interior_pixels", "selected_fraction"]
     with (output_dir / "well_summary.csv").open("w", newline="") as file:
@@ -335,11 +505,13 @@ def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None 
         "brightness_percentile": brightness_percentile,
         "uniformity_percentile": uniformity_percentile, "inset": inset,
         "processed_images": len(found), "wells": sum(bool(r["well_id"]) for r in summary),
-        "regions": len(records), "skipped_images": [r["image_id"] for r in summary if not r["well_id"]],
+        "regions": len(records), "outside_areas": len(background_records),
+        "skipped_images": [r["image_id"] for r in summary if not r["well_id"]],
         "interpretation": "Source encoded RGB (without ICC gamut conversion); regions are not verified colonies or calibrated fluorescence"
     }, indent=2))
     return {"images": len(found), "wells": sum(bool(r["well_id"]) for r in summary),
-            "regions": len(records), "skipped": [r["image_id"] for r in summary if not r["well_id"]]}
+            "regions": len(records), "outside_areas": len(background_records),
+            "skipped": [r["image_id"] for r in summary if not r["well_id"]]}
 
 
 def main() -> None:

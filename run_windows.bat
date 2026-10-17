@@ -29,8 +29,8 @@ echo Installing or updating the app dependencies...
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 goto failed
 
-echo Starting the DMEF app. Keep this window open while using it.
-".venv\Scripts\python.exe" -m streamlit run app.py
+echo Starting the DMEF app at http://localhost:8502
+".venv\Scripts\python.exe" -m streamlit run app.py --server.address localhost --server.port 8502
 if errorlevel 1 goto failed
 exit /b 0
 

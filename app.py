@@ -79,6 +79,7 @@ if st.button("Analyze wells", disabled=not uploads, type="primary"):
                 st.stop()
             summary = pd.read_csv(output / "well_summary.csv")
             details = pd.read_csv(output / "regions.csv")
+            outside = pd.read_csv(output / "outside_areas.csv")
             previews = [(p.relative_to(output).as_posix(), p.read_bytes())
                         for p in sorted(output.glob("*/*_bright_regions.png"))]
             layer_images = {p.relative_to(output).as_posix(): p.read_bytes()
@@ -86,19 +87,25 @@ if st.button("Analyze wells", disabled=not uploads, type="primary"):
                             for p in sorted(output.glob(f"*/*_{suffix}.png"))}
             color_keys = {p.relative_to(output).as_posix(): p.read_bytes()
                           for p in sorted(output.glob("*/*_color_key.png"))}
+            outside_overlays = {p.parent.name: p.read_bytes()
+                                for p in sorted(output.glob("*/outside_areas.png"))}
+            outside_keys = {p.parent.name: p.read_bytes()
+                            for p in sorted(output.glob("*/outside_color_key.png"))}
             buffer = BytesIO()
             with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
                 for path in sorted(output.rglob("*")):
                     if path.is_file():
                         archive.write(path, path.relative_to(output))
-            st.session_state["analysis"] = (report, summary, details, previews, layer_images,
-                                            color_keys, buffer.getvalue())
+            st.session_state["analysis"] = (report, summary, details, outside, previews,
+                                            layer_images, color_keys, outside_overlays,
+                                            outside_keys, buffer.getvalue())
 
 if "analysis" in st.session_state:
-    report, summary, details, previews, layer_images, color_keys, bundle = st.session_state["analysis"]
+    (report, summary, details, outside, previews, layer_images, color_keys,
+     outside_overlays, outside_keys, bundle) = st.session_state["analysis"]
     st.subheader("Results")
     st.write(f"{report['images']} readable images · {report['wells']} wells · "
-             f"{report['regions']} region annotations")
+             f"{report['regions']} region annotations · {report['outside_areas']} outside reference areas")
     st.caption("Broad regions, brighter cores, and local peaks may overlap. Their areas are measured separately; do not add them to estimate covered area.")
     if report["skipped"]:
         st.warning("Skipped images needing review: " + ", ".join(report["skipped"]))
@@ -124,10 +131,10 @@ if "analysis" in st.session_state:
             st.subheader("Areas and sizes")
             st.dataframe(rows[["region_id", "kind", "area_px", "mean_R_0_255",
                                "mean_G_0_255", "mean_B_0_255", "ratio_R_to_G",
-                               "ratio_B_to_G", "sample_hex"]].rename(columns={
+                               "ratio_G_to_B", "sample_hex"]].rename(columns={
                                    "region_id": "Region", "kind": "Type", "area_px": "Size (pixels)",
                                    "mean_R_0_255": "R", "mean_G_0_255": "G", "mean_B_0_255": "B",
-                                   "ratio_R_to_G": "R/G", "ratio_B_to_G": "B/G",
+                                   "ratio_R_to_G": "R/G", "ratio_G_to_B": "G/B",
                                    "sample_hex": "Sample color"}), hide_index=True, use_container_width=True)
             if not rows.empty:
                 selected_id = st.selectbox("Individual region", rows["region_id"].tolist(),
@@ -152,4 +159,42 @@ if "analysis" in st.session_state:
             with st.expander("Open RGB color key and distributions"):
                 st.image(color_keys[key_name], caption="One swatch, mean RGB triplet, and RGB histogram for every region.")
         st.caption("RGB values are the source image's encoded channels (0–255), preserving its Display P3 values where present; swatches are approximate on sRGB screens. These are not calibrated fluorescence.")
+    if outside_overlays:
+        st.subheader("Circled background RGB analysis")
+        st.caption("When an uploaded image contains at least three white hand-drawn loops, the app measures the pixels inside those loops. The white strokes and detected well footprints are excluded. Images without loops use eight fixed edge reference patches.")
+        outside_image = st.selectbox("Image for outside-well analysis", sorted(outside_overlays))
+        shown = outside[outside["image_id"] == outside_image]
+        left, right = st.columns(2)
+        with left:
+            st.image(outside_overlays[outside_image], caption="C labels are detected circled backgrounds; E labels are fixed edge references used only when no loops are detected.")
+        with right:
+            if shown.empty:
+                st.info("No outside edge patch remains after excluding the detected well footprints for this image.")
+                st.stop()
+            st.dataframe(shown[["area_id", "selection_method", "area_px", "mean_R_0_255",
+                                "mean_G_0_255", "mean_B_0_255", "ratio_R_to_G",
+                                "ratio_G_to_B", "sample_hex"]].rename(columns={
+                                    "area_id": "Area", "selection_method": "Selection", "area_px": "Size (pixels)",
+                                    "mean_R_0_255": "R", "mean_G_0_255": "G",
+                                    "mean_B_0_255": "B", "ratio_R_to_G": "R/G",
+                                    "ratio_G_to_B": "G/B", "sample_hex": "Sample color"}),
+                         hide_index=True, use_container_width=True)
+            selected_area = st.selectbox("Outside area", shown["area_id"].tolist())
+            selected = shown.loc[shown["area_id"] == selected_area].iloc[0]
+            mode = st.selectbox("Outside RGB measurement", ["Average", "Centroid pixel", "Integrated intensity"])
+            prefix = {"Average": "mean", "Centroid pixel": "centroid",
+                      "Integrated intensity": "integrated"}[mode]
+            values = [selected[f"{prefix}_{channel}" + ("_0_255" if prefix != "integrated" else "")]
+                      for channel in "RGB"]
+            st.bar_chart(pd.DataFrame([dict(zip("RGB", [float(v) for v in values]))], index=[mode]),
+                         color=["#d64b4b", "#4aab62", "#537ee6"])
+            st.write(" · ".join(f"{channel}: {value:,.2f}" if prefix == "mean" else
+                                f"{channel}: {int(value):,}" for channel, value in zip("RGB", values)))
+            if prefix == "centroid":
+                st.caption(f"Sampled pixel: ({int(selected['centroid_pixel_x_px'])}, "
+                           f"{int(selected['centroid_pixel_y_px'])}).")
+            elif prefix == "integrated":
+                st.caption("Sum of source channel values over the selected patch; units are encoded RGB value × pixels.")
+            with st.expander("Open outside-area RGB color key and distributions"):
+                st.image(outside_keys[outside_image], caption="Swatch, mean RGB, and channel histograms for each patch.")
     st.caption("A region count of zero means no area met these image settings; it does not establish biological absence.")

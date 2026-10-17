@@ -25,6 +25,20 @@ channels without converting the gamut to sRGB. RGB histograms in each well's
 measurement. Do not compare these values across different cameras or exposure
 settings without calibration.
 
+## Circled background and outside-well areas
+
+`outside_areas.csv` gives the same average, centroid-pixel, integrated RGB,
+pixel size, R/G and G/B measurements for each detected white hand-drawn loop.
+Loop interiors are labeled C01, C02, and so on. The white stroke and detected
+well ellipses with an enlarged rim guard are excluded. If fewer than three
+loops can be detected, the analyzer falls back to eight fixed patches: four
+image corners (E01, E03, E06, E08) and four edge centers (E02, E04, E05, E07).
+The full-image `outside_areas.png` locates the selected pixels;
+`outside_color_key.png` shows their RGB swatches and channel distributions.
+The `selection_method` field records `white loop` or `fixed edge patch`.
+These are image-background references, not biologically validated blanks or
+measurements of a wavelength spectrum.
+
 ## CSV fields
 
 | Field | Meaning |
@@ -38,7 +52,7 @@ settings without calibration.
 | `centroid_R_0_255`, `centroid_G_0_255`, `centroid_B_0_255` | Source RGB at the sampled centroid pixel. |
 | `integrated_R`, `integrated_G`, `integrated_B` | Sum of all pixel values in each channel. |
 | `integrated_RGB_total` | Sum of the three integrated channel values. |
-| `ratio_R_to_G`, `ratio_B_to_G` | Integrated R / integrated G and integrated B / integrated G. Equal to ratios of the unrounded channel means. Blank if G is zero. |
+| `ratio_R_to_G`, `ratio_G_to_B` | Integrated R / integrated G and integrated G / integrated B. Equal to ratios of the unrounded channel means. A ratio is blank when its denominator is zero. |
 | `mean_brightness_0_255` | Mean of the smoothed weighted RGB brightness used for selection. |
 | `mean_local_color_std` | Mean local RGB variation score used in selection; smaller is more uniform. |
 | `sample_hex` | Approximate swatch from rounded mean RGB values. |
@@ -49,3 +63,5 @@ For a test upload, select the included `data/raw/01-IMG_0989.jpeg` and upload
 labels are **demonstration placeholders** and must not be used as biological
 facts. `sample_regions.csv` shows example output rows from that image. The
 completed full analysis is in `bright-results/regions.csv`.
+`sample_outside_areas.csv` contains the nine detected white-loop background
+measurements from the annotated development example.

@@ -14,7 +14,9 @@ source image's 0–255 encoded RGB scale, and per-channel intensity distribution
 `regions.csv` records the exact averages with two decimal places. The included
 JPEGs use Display P3 profiles; measurements preserve their decoded RGB channel
 values. The swatches are approximate when viewed on an sRGB display. These
-values are neither linear light measurements nor calibrated fluorescence.
+raw values are not linear light measurements. The app also reports green-channel
+fluorescence standard deviation, relative error (standard deviation / average),
+and a separately labeled relative calibration whose default target is 147.
 
 These regions describe **image appearance**, not verified bacterial colonies.
 The ten supplied photographs have no individually annotated colony locations,
@@ -65,9 +67,12 @@ lets you tune brightness cutoff, uniformity, and edge exclusion. These choices
 change the detected regions and should be checked against manually marked
 examples to assess accuracy.
 
-For one region, the app offers **Average**, **Centroid pixel**, and
-**Integrated intensity** RGB views. The area table also includes R/G and G/B
-ratios. See [DATA_DICTIONARY.md](DATA_DICTIONARY.md) for formulas, units, and
+For one region, the app offers **Average**, **Calibrated average**,
+**Centroid pixel**, and **Integrated intensity** RGB views. The area table also
+includes fluorescence standard deviation, relative error, R/G, and G/B ratios.
+One shared factor scales the pixel-weighted broad-region green average to the
+target patch intensity (147 by default), while retaining every raw value.
+See [DATA_DICTIONARY.md](DATA_DICTIONARY.md) for formulas, units, and
 every CSV field. `sample_plate_map.csv` contains demonstration labels for one
 image; `sample_regions.csv` contains example output. For GitHub and public
 Streamlit hosting steps, see [DEPLOY.md](DEPLOY.md).
@@ -93,8 +98,9 @@ example used during development.
    cutoff. Find brighter cores and small peaks brighter than their neighbors
    in separate passes.
 4. Group touching pixels in each pass, discard tiny groups and near duplicate
-   masks, and calculate mean RGB from **unsmoothed original pixels** in each
-   group. Nested regions remain separate annotations.
+   masks, and calculate mean RGB, population standard deviation, and SD / mean
+   from **unsmoothed original pixels** in each group. Nested regions remain
+   separate annotations.
 5. Export numbered overlays, separate type views, RGB keys, and area tables.
    This is heuristic segmentation, not a trained colony detector. A higher
    annotation count does not establish better detection accuracy.
@@ -189,6 +195,7 @@ The project is in the public
 See [DEPLOY.md](DEPLOY.md) for the Streamlit Community Cloud configuration.
 
 ## Earlier pilot results
-The earlier pipeline reported four inner wells in every image: 40 measurements across 10 captures. That report predates the current strict image decoding. This is a detection count, not 40 independent biological samples or evidence of detection accuracy on unseen data. All labels remain unconfirmed. The baseline geometry, signed correction, refusal-to-train, and grouped-training smoke tests passed (4 tests). Synthetic smoke-test performance is not reported as research performance.
+The earlier pipeline reported four inner wells in every image: 40 measurements across 10 captures. That report predates the current strict image decoding. This is a detection count, not 40 independent biological samples or evidence of detection accuracy on unseen data. All labels remain unconfirmed. The baseline geometry, signed correction, refusal-to-train, grouped-training, and fluorescence-statistics smoke tests passed (7 tests). Synthetic smoke-test performance is not reported as research performance.
 
 The download omits large regenerated `analysis.png` copies; rerunning analysis recreates them from included originals. Review images, masks, graphs, and CSV results are included.
+

@@ -20,12 +20,30 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 REGION_FIELDS = ["image_id", "well_id", "region_id", "kind", "area_px", "center_x_px", "center_y_px",
                  "centroid_pixel_x_px", "centroid_pixel_y_px",
                  "mean_R_0_255", "mean_G_0_255", "mean_B_0_255",
+                 "std_R_0_255", "std_G_0_255", "std_B_0_255",
+                 "relative_error_R", "relative_error_G", "relative_error_B",
+                 "mean_fluorescence_0_255", "std_fluorescence_0_255", "relative_error_fluorescence",
                  "centroid_R_0_255", "centroid_G_0_255", "centroid_B_0_255",
                  "integrated_R", "integrated_G", "integrated_B", "integrated_RGB_total",
                  "ratio_R_to_G", "ratio_G_to_B", "mean_brightness_0_255",
-                 "mean_local_color_std", "sample_hex", "sample_id", "dilution"]
+                 "mean_local_color_std", "sample_hex",
+                 "calibration_target_0_255", "calibration_reference_G_0_255", "calibration_scale_factor",
+                 "scaled_mean_R_0_255", "scaled_mean_G_0_255", "scaled_mean_B_0_255",
+                 "scaled_std_R_0_255", "scaled_std_G_0_255", "scaled_std_B_0_255",
+                 "scaled_mean_fluorescence_0_255", "scaled_std_fluorescence_0_255",
+                 "sample_id", "dilution"]
 PALETTE = [(255, 74, 83), (64, 211, 240), (139, 234, 85), (219, 122, 247),
            (255, 184, 63), (57, 121, 255), (245, 103, 180), (97, 233, 181)]
+
+
+def channel_statistics(pixels: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return per-channel mean, population SD, and SD/mean for RGB pixels."""
+    values = pixels.astype(np.float64, copy=False)
+    mean = values.mean(axis=0)
+    standard_deviation = values.std(axis=0, ddof=0)
+    relative_error = np.divide(standard_deviation, mean, out=np.zeros(3, dtype=float),
+                               where=mean != 0)
+    return mean, standard_deviation, relative_error
 
 
 def read_rgb(path: Path) -> np.ndarray:
@@ -138,7 +156,7 @@ def segment_well(rgb: np.ndarray, roi: dict, *, inset: float = .12,
                    for r in regions):
                 continue
             ys, xs = np.nonzero(pixels)
-            mean_rgb = crop[pixels].mean(axis=0)
+            mean_rgb, std_rgb, relative_error_rgb = channel_statistics(crop[pixels])
             center_x, center_y = float(xs.mean()), float(ys.mean())
             nearest = np.argmin((xs - center_x) ** 2 + (ys - center_y) ** 2)
             centroid_x, centroid_y = int(xs[nearest]), int(ys[nearest])
@@ -154,6 +172,15 @@ def segment_well(rgb: np.ndarray, roi: dict, *, inset: float = .12,
                             "mean_R_0_255": round(float(mean_rgb[0]), 2),
                             "mean_G_0_255": round(float(mean_rgb[1]), 2),
                             "mean_B_0_255": round(float(mean_rgb[2]), 2),
+                            "std_R_0_255": round(float(std_rgb[0]), 2),
+                            "std_G_0_255": round(float(std_rgb[1]), 2),
+                            "std_B_0_255": round(float(std_rgb[2]), 2),
+                            "relative_error_R": round(float(relative_error_rgb[0]), 6),
+                            "relative_error_G": round(float(relative_error_rgb[1]), 6),
+                            "relative_error_B": round(float(relative_error_rgb[2]), 6),
+                            "mean_fluorescence_0_255": round(float(mean_rgb[1]), 2),
+                            "std_fluorescence_0_255": round(float(std_rgb[1]), 2),
+                            "relative_error_fluorescence": round(float(relative_error_rgb[1]), 6),
                             "centroid_R_0_255": int(centroid_rgb[0]),
                             "centroid_G_0_255": int(centroid_rgb[1]),
                             "centroid_B_0_255": int(centroid_rgb[2]),
@@ -266,9 +293,16 @@ def save_color_key(path: Path, regions: list[dict], image_id: str, well_id: str)
 BACKGROUND_FIELDS = ["image_id", "area_id", "location", "selection_method", "area_px", "center_x_px", "center_y_px",
                      "centroid_pixel_x_px", "centroid_pixel_y_px",
                      "mean_R_0_255", "mean_G_0_255", "mean_B_0_255",
+                     "std_R_0_255", "std_G_0_255", "std_B_0_255",
+                     "relative_error_R", "relative_error_G", "relative_error_B",
+                     "mean_fluorescence_0_255", "std_fluorescence_0_255", "relative_error_fluorescence",
                      "centroid_R_0_255", "centroid_G_0_255", "centroid_B_0_255",
                      "integrated_R", "integrated_G", "integrated_B", "integrated_RGB_total",
-                     "ratio_R_to_G", "ratio_G_to_B", "sample_hex"]
+                     "ratio_R_to_G", "ratio_G_to_B", "sample_hex",
+                     "calibration_target_0_255", "calibration_reference_G_0_255", "calibration_scale_factor",
+                     "scaled_mean_R_0_255", "scaled_mean_G_0_255", "scaled_mean_B_0_255",
+                     "scaled_std_R_0_255", "scaled_std_G_0_255", "scaled_std_B_0_255",
+                     "scaled_mean_fluorescence_0_255", "scaled_std_fluorescence_0_255"]
 BACKGROUND_LOCATIONS = ("top-left", "top-center", "top-right", "middle-left",
                         "middle-right", "bottom-left", "bottom-center", "bottom-right")
 
@@ -280,7 +314,7 @@ def background_record(rgb: np.ndarray, selected: np.ndarray, *, image_id: str,
     y0, x0 = origin[1], origin[0]
     ys, xs = np.nonzero(selected)
     pixels = rgb[y0:y0 + selected.shape[0], x0:x0 + selected.shape[1]][selected]
-    mean = pixels.mean(axis=0)
+    mean, standard_deviation, relative_error = channel_statistics(pixels)
     center_x, center_y = float(xs.mean()), float(ys.mean())
     nearest = np.argmin((xs - center_x) ** 2 + (ys - center_y) ** 2)
     centroid_x, centroid_y = int(xs[nearest]) + x0, int(ys[nearest]) + y0
@@ -292,6 +326,13 @@ def background_record(rgb: np.ndarray, selected: np.ndarray, *, image_id: str,
               "centroid_pixel_x_px": centroid_x, "centroid_pixel_y_px": centroid_y,
               **{f"mean_{channel}_0_255": round(float(mean[i]), 2)
                  for i, channel in enumerate("RGB")},
+              **{f"std_{channel}_0_255": round(float(standard_deviation[i]), 2)
+                 for i, channel in enumerate("RGB")},
+              **{f"relative_error_{channel}": round(float(relative_error[i]), 6)
+                 for i, channel in enumerate("RGB")},
+              "mean_fluorescence_0_255": round(float(mean[1]), 2),
+              "std_fluorescence_0_255": round(float(standard_deviation[1]), 2),
+              "relative_error_fluorescence": round(float(relative_error[1]), 6),
               **{f"centroid_{channel}_0_255": int(centroid[i])
                  for i, channel in enumerate("RGB")},
               **{f"integrated_{channel}": int(integrated[i])
@@ -420,9 +461,39 @@ def save_outside_overlay(path: Path, rgb: np.ndarray, areas: list[dict]) -> None
     image.save(path)
 
 
+def apply_fluorescence_calibration(records: list[dict], background_records: list[dict],
+                                   target_patch_intensity: float) -> tuple[float | None, float | None]:
+    """Scale RGB statistics so the pixel-weighted broad-region green mean hits the target."""
+    if not np.isfinite(target_patch_intensity) or not 0 < target_patch_intensity <= 255:
+        raise ValueError("Target fluorescence patch intensity must be between 0 and 255")
+    reference_records = [record for record in records if record.get("kind") == "broad"] or records
+    reference_pixels = sum(int(record["area_px"]) for record in reference_records)
+    reference_green = (sum(float(record["integrated_G"]) for record in reference_records) / reference_pixels
+                       if reference_pixels else None)
+    scale_factor = (float(target_patch_intensity) / reference_green
+                    if reference_green is not None and reference_green > 0 else None)
+    for record in [*records, *background_records]:
+        record["calibration_target_0_255"] = round(float(target_patch_intensity), 2)
+        record["calibration_reference_G_0_255"] = (round(reference_green, 4)
+                                                    if reference_green is not None else "")
+        record["calibration_scale_factor"] = (round(scale_factor, 8)
+                                               if scale_factor is not None else "")
+        for channel in "RGB":
+            record[f"scaled_mean_{channel}_0_255"] = (
+                round(float(record[f"mean_{channel}_0_255"]) * scale_factor, 2)
+                if scale_factor is not None else "")
+            record[f"scaled_std_{channel}_0_255"] = (
+                round(float(record[f"std_{channel}_0_255"]) * scale_factor, 2)
+                if scale_factor is not None else "")
+        record["scaled_mean_fluorescence_0_255"] = record["scaled_mean_G_0_255"]
+        record["scaled_std_fluorescence_0_255"] = record["scaled_std_G_0_255"]
+    return reference_green, scale_factor
+
+
 def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None = None,
                    plate_map_path: Path | None = None, brightness_percentile: int = 75,
-                   uniformity_percentile: int = 80, inset: float = .12) -> dict:
+                   uniformity_percentile: int = 80, inset: float = .12,
+                   target_patch_intensity: float = 147.0) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     overrides = json.loads(rois_path.read_text()) if rois_path else {}
     plate_map = {}
@@ -485,6 +556,8 @@ def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None 
                             "regions": len(regions), "sample_id": labels.get("sample_id", ""),
                             "dilution": labels.get("dilution", ""), **{k: v for k, v in settings.items()
                                                                        if k != "crop_origin"}})
+    calibration_reference, calibration_factor = apply_fluorescence_calibration(
+        records, background_records, target_patch_intensity)
     with (output_dir / "regions.csv").open("w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=REGION_FIELDS)
         writer.writeheader()
@@ -504,13 +577,19 @@ def analyze_folder(input_dir: Path, output_dir: Path, *, rois_path: Path | None 
     (output_dir / "run.json").write_text(json.dumps({
         "brightness_percentile": brightness_percentile,
         "uniformity_percentile": uniformity_percentile, "inset": inset,
+        "calibration_target_0_255": target_patch_intensity,
+        "calibration_reference_G_0_255": calibration_reference,
+        "calibration_scale_factor": calibration_factor,
         "processed_images": len(found), "wells": sum(bool(r["well_id"]) for r in summary),
         "regions": len(records), "outside_areas": len(background_records),
         "skipped_images": [r["image_id"] for r in summary if not r["well_id"]],
-        "interpretation": "Source encoded RGB (without ICC gamut conversion); regions are not verified colonies or calibrated fluorescence"
+        "interpretation": "Raw source encoded RGB is preserved. Scaled values use a relative green-channel patch calibration and are not absolute fluorescence units; regions are not verified colonies."
     }, indent=2))
     return {"images": len(found), "wells": sum(bool(r["well_id"]) for r in summary),
             "regions": len(records), "outside_areas": len(background_records),
+            "calibration_target": target_patch_intensity,
+            "calibration_reference": calibration_reference,
+            "calibration_factor": calibration_factor,
             "skipped": [r["image_id"] for r in summary if not r["well_id"]]}
 
 
@@ -523,13 +602,16 @@ def main() -> None:
     parser.add_argument("--brightness-percentile", type=int, default=75)
     parser.add_argument("--uniformity-percentile", type=int, default=80)
     parser.add_argument("--inset", type=float, default=.12)
+    parser.add_argument("--target-patch-intensity", type=float, default=147.0)
     args = parser.parse_args()
     print(json.dumps(analyze_folder(args.input, args.output, rois_path=args.rois,
                                     plate_map_path=args.plate_map,
                                     brightness_percentile=args.brightness_percentile,
                                     uniformity_percentile=args.uniformity_percentile,
-                                    inset=args.inset)))
+                                    inset=args.inset,
+                                    target_patch_intensity=args.target_patch_intensity)))
 
 
 if __name__ == "__main__":
     main()
+

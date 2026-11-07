@@ -26,6 +26,10 @@ brightness = st.slider("Broad-region brightness cutoff (percentile within each w
 uniformity = st.slider("Allowed local color variation (percentile among bright pixels)", 40, 90, 80, 5,
                        help="Lower values require more uniform neighboring pixels.")
 inset = st.slider("Exclude the reflective edge (% of radius)", 5, 25, 12, 1) / 100
+target_patch_intensity = st.number_input(
+    "Target fluorescence patch intensity (green channel)", min_value=1.0, max_value=255.0,
+    value=147.0, step=1.0,
+    help="Applies one shared scale factor so the pixel-weighted broad-region green average matches this reference. Raw values remain unchanged.")
 
 if st.button("Analyze wells", disabled=not uploads, type="primary"):
     with st.spinner("Analyzing original pixels..."):
@@ -73,7 +77,8 @@ if st.button("Analyze wells", disabled=not uploads, type="primary"):
             try:
                 report = analyze_folder(source, output, brightness_percentile=brightness,
                                         uniformity_percentile=uniformity, inset=inset,
-                                        plate_map_path=map_path)
+                                        plate_map_path=map_path,
+                                        target_patch_intensity=target_patch_intensity)
             except (ValueError, OSError) as error:
                 st.error(f"Analysis could not finish: {error}")
                 st.stop()
@@ -106,6 +111,10 @@ if "analysis" in st.session_state:
     st.subheader("Results")
     st.write(f"{report['images']} readable images · {report['wells']} wells · "
              f"{report['regions']} region annotations · {report['outside_areas']} outside reference areas")
+    if report["calibration_factor"] is not None:
+        st.caption(f"Fluorescence calibration: broad-region green reference "
+                   f"{report['calibration_reference']:.2f} → target {report['calibration_target']:.2f}; "
+                   f"shared scale factor {report['calibration_factor']:.6f}×. Raw RGB values are retained.")
     st.caption("Broad regions, brighter cores, and local peaks may overlap. Their areas are measured separately; do not add them to estimate covered area.")
     if report["skipped"]:
         st.warning("Skipped images needing review: " + ", ".join(report["skipped"]))
@@ -129,36 +138,50 @@ if "analysis" in st.session_state:
                 rows = rows[rows["kind"] == {"broad": "broad", "cores": "bright core",
                                               "peaks": "local peak"}[suffix]]
             st.subheader("Areas and sizes")
-            st.dataframe(rows[["region_id", "kind", "area_px", "mean_R_0_255",
-                               "mean_G_0_255", "mean_B_0_255", "ratio_R_to_G",
+            display_rows = rows.copy()
+            display_rows["relative_error_percent"] = display_rows["relative_error_fluorescence"] * 100
+            st.dataframe(display_rows[["region_id", "kind", "area_px", "mean_R_0_255",
+                               "mean_G_0_255", "mean_B_0_255", "std_fluorescence_0_255",
+                               "relative_error_percent", "scaled_mean_fluorescence_0_255", "ratio_R_to_G",
                                "ratio_G_to_B", "sample_hex"]].rename(columns={
                                    "region_id": "Region", "kind": "Type", "area_px": "Size (pixels)",
                                    "mean_R_0_255": "R", "mean_G_0_255": "G", "mean_B_0_255": "B",
+                                   "std_fluorescence_0_255": "Fluorescence SD",
+                                   "relative_error_percent": "Relative error (%)",
+                                   "scaled_mean_fluorescence_0_255": "Scaled fluorescence",
                                    "ratio_R_to_G": "R/G", "ratio_G_to_B": "G/B",
                                    "sample_hex": "Sample color"}), hide_index=True, use_container_width=True)
             if not rows.empty:
                 selected_id = st.selectbox("Individual region", rows["region_id"].tolist(),
                                            format_func=lambda number: f"Region {number}")
-                mode = st.selectbox("RGB measurement", ["Average", "Centroid pixel", "Integrated intensity"])
+                mode = st.selectbox("RGB measurement", ["Average", "Calibrated average", "Centroid pixel", "Integrated intensity"])
                 selected = rows.loc[rows["region_id"] == selected_id].iloc[0]
-                prefix = {"Average": "mean", "Centroid pixel": "centroid",
+                prefix = {"Average": "mean", "Calibrated average": "scaled_mean", "Centroid pixel": "centroid",
                           "Integrated intensity": "integrated"}[mode]
                 values = [selected[f"{prefix}_{channel}" + ("_0_255" if prefix != "integrated" else "")]
                           for channel in "RGB"]
                 chart = pd.DataFrame([dict(zip("RGB", [float(value) for value in values]))],
                                      index=[mode])
                 st.bar_chart(chart, color=["#d64b4b", "#4aab62", "#537ee6"])
-                st.write(" · ".join(f"{channel}: {value:,.2f}" if prefix == "mean" else
+                st.write(" · ".join(f"{channel}: {value:,.2f}" if prefix in {"mean", "scaled_mean"} else
                                     f"{channel}: {int(value):,}" for channel, value in zip("RGB", values)))
                 if prefix == "centroid":
                     st.caption(f"Nearest region pixel to its geometric center: "
                                f"({int(selected['centroid_pixel_x_px'])}, {int(selected['centroid_pixel_y_px'])}).")
                 elif prefix == "integrated":
                     st.caption("Sum of each source channel across the region's pixels; units are encoded RGB value × pixels.")
+                elif prefix == "scaled_mean":
+                    st.caption(f"Raw averages multiplied by the shared {selected['calibration_scale_factor']:.6f}× calibration factor.")
+                st.subheader("Fluorescence precision")
+                metric_1, metric_2, metric_3, metric_4 = st.columns(4)
+                metric_1.metric("Raw average (G)", f"{selected['mean_fluorescence_0_255']:.2f}")
+                metric_2.metric("Standard deviation", f"{selected['std_fluorescence_0_255']:.2f}")
+                metric_3.metric("Relative error", f"{100 * selected['relative_error_fluorescence']:.2f}%")
+                metric_4.metric("Scaled average", f"{selected['scaled_mean_fluorescence_0_255']:.2f}")
             key_name = chosen.replace("_bright_regions.png", "_color_key.png")
             with st.expander("Open RGB color key and distributions"):
                 st.image(color_keys[key_name], caption="One swatch, mean RGB triplet, and RGB histogram for every region.")
-        st.caption("RGB values are the source image's encoded channels (0–255), preserving its Display P3 values where present; swatches are approximate on sRGB screens. These are not calibrated fluorescence.")
+        st.caption("Raw RGB values are the source image's encoded channels (0–255), preserving Display P3 values where present. Scaled values use a relative green-channel patch calibration; they are not absolute photon measurements.")
     if outside_overlays:
         st.subheader("Circled background RGB analysis")
         st.caption("When an uploaded image contains at least three white hand-drawn loops, the app measures the pixels inside those loops. The white strokes and detected well footprints are excluded. Images without loops use eight fixed edge reference patches.")
@@ -171,30 +194,44 @@ if "analysis" in st.session_state:
             if shown.empty:
                 st.info("No outside edge patch remains after excluding the detected well footprints for this image.")
                 st.stop()
-            st.dataframe(shown[["area_id", "selection_method", "area_px", "mean_R_0_255",
-                                "mean_G_0_255", "mean_B_0_255", "ratio_R_to_G",
+            display_outside = shown.copy()
+            display_outside["relative_error_percent"] = display_outside["relative_error_fluorescence"] * 100
+            st.dataframe(display_outside[["area_id", "selection_method", "area_px", "mean_R_0_255",
+                                "mean_G_0_255", "mean_B_0_255", "std_fluorescence_0_255",
+                                "relative_error_percent", "scaled_mean_fluorescence_0_255", "ratio_R_to_G",
                                 "ratio_G_to_B", "sample_hex"]].rename(columns={
                                     "area_id": "Area", "selection_method": "Selection", "area_px": "Size (pixels)",
                                     "mean_R_0_255": "R", "mean_G_0_255": "G",
-                                    "mean_B_0_255": "B", "ratio_R_to_G": "R/G",
+                                    "mean_B_0_255": "B", "std_fluorescence_0_255": "Fluorescence SD",
+                                    "relative_error_percent": "Relative error (%)",
+                                    "scaled_mean_fluorescence_0_255": "Scaled fluorescence", "ratio_R_to_G": "R/G",
                                     "ratio_G_to_B": "G/B", "sample_hex": "Sample color"}),
                          hide_index=True, use_container_width=True)
             selected_area = st.selectbox("Outside area", shown["area_id"].tolist())
             selected = shown.loc[shown["area_id"] == selected_area].iloc[0]
-            mode = st.selectbox("Outside RGB measurement", ["Average", "Centroid pixel", "Integrated intensity"])
-            prefix = {"Average": "mean", "Centroid pixel": "centroid",
+            mode = st.selectbox("Outside RGB measurement", ["Average", "Calibrated average", "Centroid pixel", "Integrated intensity"])
+            prefix = {"Average": "mean", "Calibrated average": "scaled_mean", "Centroid pixel": "centroid",
                       "Integrated intensity": "integrated"}[mode]
             values = [selected[f"{prefix}_{channel}" + ("_0_255" if prefix != "integrated" else "")]
                       for channel in "RGB"]
             st.bar_chart(pd.DataFrame([dict(zip("RGB", [float(v) for v in values]))], index=[mode]),
                          color=["#d64b4b", "#4aab62", "#537ee6"])
-            st.write(" · ".join(f"{channel}: {value:,.2f}" if prefix == "mean" else
+            st.write(" · ".join(f"{channel}: {value:,.2f}" if prefix in {"mean", "scaled_mean"} else
                                 f"{channel}: {int(value):,}" for channel, value in zip("RGB", values)))
             if prefix == "centroid":
                 st.caption(f"Sampled pixel: ({int(selected['centroid_pixel_x_px'])}, "
                            f"{int(selected['centroid_pixel_y_px'])}).")
             elif prefix == "integrated":
                 st.caption("Sum of source channel values over the selected patch; units are encoded RGB value × pixels.")
+            elif prefix == "scaled_mean":
+                st.caption(f"Raw averages multiplied by the shared {selected['calibration_scale_factor']:.6f}× calibration factor.")
+            st.subheader("Background fluorescence precision")
+            metric_1, metric_2, metric_3, metric_4 = st.columns(4)
+            metric_1.metric("Raw average (G)", f"{selected['mean_fluorescence_0_255']:.2f}")
+            metric_2.metric("Standard deviation", f"{selected['std_fluorescence_0_255']:.2f}")
+            metric_3.metric("Relative error", f"{100 * selected['relative_error_fluorescence']:.2f}%")
+            metric_4.metric("Scaled average", f"{selected['scaled_mean_fluorescence_0_255']:.2f}")
             with st.expander("Open outside-area RGB color key and distributions"):
                 st.image(outside_keys[outside_image], caption="Swatch, mean RGB, and channel histograms for each patch.")
     st.caption("A region count of zero means no area met these image settings; it does not establish biological absence.")
+
